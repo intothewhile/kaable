@@ -149,7 +149,6 @@ a.tw {
   transition: 0.4s filter linear;
 }
 
-#intro:hover #kaable,
 .music #intro #kaable,
 .music h1,
 .music a.tw {
@@ -408,150 +407,264 @@ a.tw {
   <a href="https://twitter.com/kaable" class="tw" target="_blank">twitter</a>
 
   <script>
-  window.onload = function() {
+  context = new (window.AudioContext || window.webkitAudioContext)();
 
-      var audio,
-          analyser,
-          audioContext,
-          sourceNode;
+  if (!context.createGain)
+    context.createGain = context.createGainNode;
+  if (!context.createDelay)
+    context.createDelay = context.createDelayNode;
+  if (!context.createScriptProcessor)
+    context.createScriptProcessor = context.createJavaScriptNode;
 
-      var item = document.getElementById('home'),
-          svg = document.getElementById('svg'),
-          svgNS = svg.namespaceURI,
-          g = document.createElementNS(svgNS, "g");
+  // shim layer with setTimeout fallback
+  window.requestAnimFrame = (function(){
+  return  window.requestAnimationFrame       ||
+    window.webkitRequestAnimationFrame ||
+    window.mozRequestAnimationFrame    ||
+    window.oRequestAnimationFrame      ||
+    window.msRequestAnimationFrame     ||
+    function( callback ){
+    window.setTimeout(callback, 1000 / 60);
+  };
+  })();
 
-      var width = window.innerWidth,
-          height = window.innerHeight,
-          maxHeight = Math.max(height * 0.3, 300),
-          fftSize = 512, // 512
-          choke = 110; //110
 
-          if (width < 650) {
-            fftSize = 128;
+  function playSound(buffer, time) {
+    var source = context.createBufferSource();
+    source.buffer = buffer;
+    source.connect(context.destination);
+    source[source.start ? 'start' : 'noteOn'](time);
+  }
+
+  function loadSounds(obj, soundMap, callback) {
+    // Array-ify
+    var names = [];
+    var paths = [];
+    for (var name in soundMap) {
+      var path = soundMap[name];
+      names.push(name);
+      paths.push(path);
+    }
+    bufferLoader = new BufferLoader(context, paths, function(bufferList) {
+      for (var i = 0; i < bufferList.length; i++) {
+        var buffer = bufferList[i];
+        var name = names[i];
+        obj[name] = buffer;
+      }
+      if (callback) {
+        callback();
+      }
+    });
+    bufferLoader.load();
+  }
+
+
+
+
+  function BufferLoader(context, urlList, callback) {
+    this.context = context;
+    this.urlList = urlList;
+    this.onload = callback;
+    this.bufferList = new Array();
+    this.loadCount = 0;
+  }
+
+  BufferLoader.prototype.loadBuffer = function(url, index) {
+    // Load buffer asynchronously
+    var request = new XMLHttpRequest();
+    request.open("GET", url, true);
+    request.responseType = "arraybuffer";
+
+    var loader = this;
+
+    request.onload = function() {
+      // Asynchronously decode the audio file data in request.response
+      loader.context.decodeAudioData(
+        request.response,
+        function(buffer) {
+          if (!buffer) {
+            alert('error decoding file data: ' + url);
+            return;
           }
-
-
-          audio = new Audio();
-          audio.src = "/assets/kaable.mp3";
-
-
-
-        setup();
-
-
-      function setup() {
-        document.getElementById('intro').addEventListener('click', function () {
-          initaction();
-        });
-
-        document.body.onkeyup = function(e){
-        if(e.keyCode == 32){
-          initaction();
+          loader.bufferList[index] = buffer;
+          if (++loader.loadCount == loader.urlList.length)
+            loader.onload(loader.bufferList);
+        },
+        function(error) {
+          console.error('decodeAudioData error', error);
         }
-        };
-      }
+      );
+    }
 
-        function initaction() {
-          if (item.classList.contains('music')) {
-            stopsong();
-            item.classList.remove('music');
-          }
-          else {
-            item.classList.add('music');
-            if (item.classList.contains('loaded')) {
-              playsong();
-            }
-            else {
-              item.classList.add('loading');
-            }
-          }
-        }
+    request.onerror = function() {
+      alert('BufferLoader: XHR error');
+    }
 
+    request.send();
+  };
 
-        audio.addEventListener('canplay', function () {
-          item.classList.add('loaded');
+  BufferLoader.prototype.load = function() {
+    for (var i = 0; i < this.urlList.length; ++i)
+    this.loadBuffer(this.urlList[i], i);
+  };
 
-          audioContext = new AudioContext();
-          analyser = (analyser || audioContext.createAnalyser());
-          analyser.minDecibels = -90;
-          analyser.maxDecibels = -10;
-          analyser.smoothingTimeConstant = 1;
-          analyser.fftSize = fftSize;
+  var item = document.getElementById('home'),
+      svg = document.getElementById('svg'),
+      svgNS = svg.namespaceURI,
+      g = document.createElementNS(svgNS, "g");
 
-          sourceNode = audioContext.createMediaElementSource(audio);
-          sourceNode.connect(analyser);
-          sourceNode.connect(audioContext.destination);
-
-          if (item.classList.contains('music')) {
-            item.classList.remove('loading');
-            playsong();
-          }
-        });
-
-      function playsong() {
-        audio.play();
-        update();
-      }
-
-      function stopsong() {
-        audio.pause();
-        item.classList.remove('loading');
-      }
-
-      audio.addEventListener("ended", function() {
-        this.play();
-      });
-
-      function shape(g, freqValue, freqSequence, freqCount) {
-        var freqRatio = freqSequence/freqCount,
-            x = width * freqRatio,
-            y = height / 2;
-
-        var polyline = document.createElementNS(svgNS, "polyline"),
-            freqRatio = freqValue / 255,
-            throttledRatio = (freqValue - choke) / (255 - choke),
-            strokeWidth = width / freqCount * 0.6 * throttledRatio,
-            throttledY = Math.max(throttledRatio, 0) * maxHeight;
-
-        var loc_x = x - strokeWidth / 2,
-            loc_y1 = y - throttledY / 2,
-            loc_y2 = y + throttledY / 2;
-
-        if (throttledRatio > 0) {
-              var point_1 = loc_x + "," + loc_y1,
-                  point_2 = loc_x + "," + loc_y2;
-          var points = [ point_1, point_2 ];
-        } else {
-          var points = [loc_x + "," + (y-1),loc_x + "," + (y+1)];
-        }
-
-        polyline.setAttribute("stroke-width", "2px");
-        polyline.setAttribute("points", points.join(" "));
-        g.appendChild(polyline);
-      }
+  var width = window.innerWidth,
+      height = window.innerHeight,
+      maxHeight = Math.max(height * 0.3, 300),
+      fftSize = 512, // 512
+      choke = 110; //110
 
       svg.setAttribute("width", width+"px");
       svg.setAttribute("height", height+"px");
       svg.setAttribute("viewBox", "0 0 " + width + " " + height);
       svg.appendChild(g);
 
-      function update() {
-        g.remove();
-        g = document.createElementNS(svgNS, "g");
-        var freqArray = new Uint8Array(analyser.frequencyBinCount);
-        analyser.getByteTimeDomainData(freqArray);
 
-        for (var i = 0; i < freqArray.length; i++) {
-          var v = freqArray[i];
-          shape(g, v, i+1, freqArray.length);
-        }
-        svg.appendChild(g);
 
-        requestAnimationFrame(update);
+
+  function VisualizerSample() {
+    this.analyser = context.createAnalyser();
+
+    this.analyser.connect(context.destination);
+    this.analyser.minDecibels = -90;
+    this.analyser.maxDecibels = -10;
+    this.analyser.smoothingTimeConstant = 1;
+    this.analyser.fftSize = fftSize;
+
+
+    loadSounds(this, {
+      buffer: './assets/kaable.mp3'
+    }, onLoaded);
+    this.times = new Uint8Array(this.analyser.frequencyBinCount);
+
+    function onLoaded() {
+      item.classList.add('loaded');
+      if (item.classList.contains('music')) {
+        item.classList.remove('loading');
+        this.togglePlayback();
       }
-
-
     };
+
+    this.isPlaying = false;
+    this.startTime = 0;
+    this.startOffset = 0;
+  }
+
+  // Toggle playback
+  VisualizerSample.prototype.togglePlayback = function() {
+    if (this.isPlaying) {
+      // Stop playback
+      this.source[this.source.stop ? 'stop': 'noteOff'](0);
+      this.startOffset += context.currentTime - this.startTime;
+      console.log('paused at', this.startOffset);
+      item.classList.remove('loading');
+      // Save the position of the play head.
+    } else {
+      this.startTime = context.currentTime;
+      console.log('started at', this.startOffset);
+      this.source = context.createBufferSource();
+      // Connect graph
+      this.source.connect(this.analyser);
+      this.source.buffer = this.buffer;
+      this.source.loop = true;
+
+      this.source[this.source.start ? 'start' : 'noteOn'](0, this.startOffset % this.buffer.duration);
+
+      requestAnimFrame(this.draw.bind(this));
+    }
+    this.isPlaying = !this.isPlaying;
+  }
+
+  VisualizerSample.prototype.shape = function(g, freqValue, freqSequence, freqCount) {
+    var freqRatio = freqSequence/freqCount,
+        x = width * freqRatio,
+        y = height / 2;
+
+    var polyline = document.createElementNS(svgNS, "polyline"),
+        freqRatio = freqValue / 255,
+        throttledRatio = (freqValue - choke) / (255 - choke),
+        strokeWidth = width / freqCount * 0.6 * throttledRatio,
+        throttledY = Math.max(throttledRatio, 0) * maxHeight;
+
+    var loc_x = x - strokeWidth / 2,
+        loc_y1 = y - throttledY / 2,
+        loc_y2 = y + throttledY / 2;
+
+    if (throttledRatio > 0) {
+          var point_1 = loc_x + "," + loc_y1,
+              point_2 = loc_x + "," + loc_y2;
+      var points = [ point_1, point_2 ];
+    } else {
+      var points = [loc_x + "," + (y-1),loc_x + "," + (y+1)];
+    }
+
+    polyline.setAttribute("stroke-width", "2px");
+    polyline.setAttribute("points", points.join(" "));
+
+    g.appendChild(polyline);
+  };
+
+  VisualizerSample.prototype.draw = function() {
+
+    this.analyser.getByteTimeDomainData(this.times);
+
+    g.remove();
+    g = document.createElementNS(svgNS, "g");
+
+
+    for (var i = 0; i < this.analyser.frequencyBinCount; i++) {
+      var v = this.times[i];
+      this.shape(g, v, i+1, this.times.length);
+    }
+
+    svg.appendChild(g);
+
+    if (this.isPlaying) {
+      requestAnimFrame(this.draw.bind(this));
+    }
+  };
+
+window.onload = function() {
+  var sample = new VisualizerSample();
+  document.getElementById('intro').addEventListener('click', function () {
+    if (item.classList.contains('music')) {
+      sample.togglePlayback();
+      item.classList.remove('music');
+    }
+    else {
+      item.classList.add('music');
+      if (item.classList.contains('loaded')) {
+        sample.togglePlayback();
+      }
+      else {
+        item.classList.add('loading');
+      }
+    }
+  });
+
+  document.body.onkeyup = function(e){
+  if(e.keyCode == 32){
+    if (item.classList.contains('music')) {
+      sample.togglePlayback();
+      item.classList.remove('music');
+    }
+    else {
+      item.classList.add('music');
+      if (item.classList.contains('loaded')) {
+        sample.togglePlayback();
+      }
+      else {
+        item.classList.add('loading');
+      }
+    }
+  }
+  };
+};
 </script>
 </body>
 
